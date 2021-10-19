@@ -1,151 +1,170 @@
-import logo from './logo.svg';
+
 import { useState, useEffect } from 'react'
 import axios from "axios"
+import firebase from './firebaseApp'
+import UpdateUser from './updateUser'
+import AddUser from './addUser'
+import { Button, Container, Row, Col } from "react-bootstrap"
+import 'bootstrap/dist/css/bootstrap.min.css';
+import { useDispatch, useSelector } from "react-redux";
+
 import './App.css';
 
 function App() {
 
-  const [clients, setclients] = useState([])
-  const [clients2, setclients2] = useState([])
-  const [client, setClient] = useState({})
-  const [adduser, setAdduser] = useState(false)
-  const [velidError, setVelidError] = useState(false)
-  const [velidErrorServer, setVelidErrorServer] = useState("")
-
+  const [updateuser, setUpdateuser] = useState(false)
+  const [id, setId] = useState(0)
+  const [addeuser, setAddeuser] = useState(false)
+  const [velidError, setVelidError] = useState("")
+  const dispatch = useDispatch()
+  const storeData = useSelector(state => state)
 
   useEffect(() => {
     async function getData() {
-      let clients = await axios.get("http://localhost:8000/clients")
-      console.log(clients)
-      await setclients(clients.data)
-      await setclients2(clients.data)
+      let clients = await axios.get("https://randomuser.me/api/?results=10")
+
+      let Cliets = clients.data.results.map(x => ({
+        name: x.name.title + " " + x.name.first + " " + x.name.last,
+        email: x.email, picture: x.picture.medium,
+        location: x.location.street.name + " " + x.location.city + " " + x.location.country,
+        id: x.login.uuid
+      }))
+      let dataParse = await firebase.firestore().collection('persons').get();
+
+      let persData = []
+
+      dataParse.forEach(doc => {
+        persData.push({
+          name: doc.data().name, email: doc.data().email, location: doc.data().location,
+          picture: doc.data().picture, id: doc.data().id
+        })
+      })
+      let validationClients = Cliets.map(x => { checkValidation(x) })
+
+      let errorValidation = validationClients.filter(x => x == "Proper validation")
+
+      console.log(errorValidation)
+      if (errorValidation.length == 0) {
+        if (persData.length == 1) {
+          Cliets.forEach(x => firebase.firestore().collection('persons').add(x).then(status => {
+            console.log('Created');
+          }));
+        }
+        if (storeData.users.length == 0) {
+          persData.forEach(x => dispatch({ type: "ADD", payload: x }));
+        }
+      }
+      else {
+        setVelidError(errorValidation[0])
+      }
+
+
     }
     getData()
   }, [])
 
-  const addClientoDB = async (client) => {
-    let constainsOlettersName = /^[a-z,A-Z ]+$/.test(client.fullname);
-    let constainsONumbrtdId = /^\d+$/.test(client.idtz)
-    let constainsONumbersPhoneNumber = /^\d+$/.test(client.phonenumber)
-    let constainsLettersIpAddress = /^[a-z,A-Z]+$/.test(client.ipaddress)
 
-    if (constainsOlettersName && constainsONumbrtdId && constainsONumbersPhoneNumber
-      && !constainsLettersIpAddress && client.fullname != "" && client.idtz != "" &&
-      client.phonenumber != "" && client.ipaddress != "") {
-      let created = await axios.post("http://localhost:8000/clients", { client })
-      if (created.data === "Created") {
-        let clients = await axios.get("http://localhost:8000/clients")
-        await setclients([...clients.data])
-        await setclients2([...clients.data])
-        await setVelidError(false)
-        await setVelidErrorServer("")
-        setAdduser(false)
-      }
-      else {
-        await setVelidError(false)
-        setVelidErrorServer(created.data)
-      }
-    }
-    else {
-      setVelidError(true)
-      await setVelidErrorServer("")
-    }
-  }
-
-  const filterbyCityOrCounry = async (str) => {
+  const filter = async (str) => {
     if (str.length == 0) {
-      let clients = await axios.get("http://localhost:8000/clients")
-      setclients([...clients.data])
+      let clients = await firebase.firestore().collection('persons').get();
+      let persData = []
+      clients.forEach(doc => {
+        persData.push({
+          name: doc.data().name, email: doc.data().email, location: doc.data().location,
+          picture: doc.data().picture, id: doc.data().id
+        })
+      })
+      await dispatch({ type: "REPLECE", payload: persData })
     }
     else {
-      let ClientsFiler = clients2.filter(x => x.city.startsWith(str) || x.country.startsWith(str))
+      let ClientsFiler = storeData.users.filter(x => x.id.includes(str) || x.email.includes(str) ||
+        x.location.includes(str) || x.name.includes(str))
 
-      setclients([...ClientsFiler])
+      await dispatch({ type: "REPLECE", payload: ClientsFiler })
     }
 
   }
 
-  const filterClients = async (str) => {
-    console.log(str.length)
-    if (str.length == 0) {
-      let clients = await axios.get("http://localhost:8000/clients")
-      setclients([...clients.data])
+
+
+
+  const checkValidation = async (data) => {
+    const re = /\S+@\S+\.\S+/;
+    if (data.location == "" || data.picture == "" || data.name || data.id || data.email == "") {
+      return "error !! empty field"
+    }
+    else if (data.name.length <= 3) {
+      return "error || name length should be bigger the 3"
+    }
+    else if (!re.test(data.email)) {
+      return "error || email length shold "
     }
     else {
-      let ClientsFiler = clients2.filter(x => x.fullname.includes(str) || x.idtz.toString().includes(str) ||
-        x.phonenumber.includes(str) || x.ipaddress.includes(str))
-
-      setclients([...ClientsFiler])
-    }
-
-  }
-
-  const closeAll = async () => {
-    setAdduser(false)
-    setVelidError(false)
-    await setVelidErrorServer("")
-  }
-
-  const deleteClient = async (id) => {
-    let deleted = await axios.delete("http://localhost:8000/clients/" + id)
-    if (deleted.data === "Deleted") {
-      let Clients = clients.filter(x => x._id != id)
-      let newclients = [...Clients]
-      console.log(newclients)
-      await setclients([...newclients])
-      await setclients2([...newclients])
+      return "Proper validation"
     }
   }
+
+  const choseOne = async (id) => {
+    setUpdateuser(true)
+    setId(id)
+  }
+
+
+  const deleteDb = async (id) => {
+    var jobskill_query = firebase.firestore().collection('persons').where('id', '==', id);
+    jobskill_query.get().then(function (querySnapshot) {
+      querySnapshot.forEach(function (doc) {
+        doc.ref.delete();
+      });
+    });
+    dispatch({ type: "DELETE", payload: id })
+  }
+
+
+
+
+
   return (
     <div className="App">
+
       <div className="SearchCity" style={{ marginRight: "130px", marginTop: "10px" }}>
-        Search by city or country:   <input type="text" onChange={(e) => filterbyCityOrCounry(e.target.value)} ></input>
+        Search:   <input type="text" onChange={(e) => filter(e.target.value)} ></input>
       </div>  <br />
 
 
-      <div className="Search">
-        Search :
-        <input type="text" onChange={(e) => filterClients(e.target.value)} ></input>
-      </div>
-      <br />
-      <div className="buttomAdd">
-        <input type="button" value="Add Client" onClick={() => setAdduser(true)} />
-      </div>
-
-
-      {adduser && <div className="adduser">
-        <h3>Add user</h3>
-        full name : <input style={{ marginRight: "100px", marginTop: "10px" }} type="text" onChange={(e) => setClient({ ...client, fullname: e.target.value })} ></input> <br />
-        id-tz : <input style={{ marginRight: "70px", marginTop: "10px" }} type="text" onChange={(e) => setClient({ ...client, idtz: e.target.value })} ></input> <br />
-        phone number : <input type="text" style={{ marginRight: "140px", marginTop: "10px" }} onChange={(e) => setClient({ ...client, phonenumber: e.target.value })} ></input> <br />
-        ip address : <input type="text" style={{ marginRight: "110px", marginTop: "10px" }} onChange={(e) => setClient({ ...client, ipaddress: e.target.value })} ></input> <br />
-        {velidError && <p>validation error</p>}
-        <p>{velidErrorServer}</p>
-        <input type="button" value="Add" onClick={() => addClientoDB(client)} />
-        <input type="button" value="Cencel" onClick={closeAll} />
-      </div>}
+      <Button variant="primary" onClick={() => setAddeuser(true)}>Add</Button> <br />
+      {console.log(addeuser)}
+      {addeuser && < AddUser callback={() => setAddeuser(false)} />}
+      <p>{velidError}</p>
       {
-        clients.map(x => {
+
+        storeData.users.map(x => {
           return (
-            <div className="userDate" key={x._id}>
-              <p>full name: {x.fullname}</p> <br />
-              <p>tz: {x.idtz}</p> <br />
-              <p>phone number: {x.phonenumber}</p> <br />
-              <p>ip address: {x.ipaddress}</p>  <br />
+            <Container className="userDate" key={x._id}>
+              <Row>
+                <Col>
+                  <p>name:{x.name}</p> <br />
+                  <p>email: {x.email}</p> <br />
+                  <img src={x.picture}></img>
+                  <p>location: {x.location}</p>  <br />
+                  <p>Id: {x.id}</p>  <br />
+                  <Button style={{ marginBottom: "5px" }} variant="primary" onClick={() => deleteDb(x.id)}>Delete</Button>  <br />
+                  <Button variant="primary" onClick={() => choseOne(x.id)}>Update</Button>
 
-              {
-                x.country && x.city && <div>
-                  <p>city: {x.city}</p>  <br />
-                  <p>country: {x.country}</p>  <br />
-                </div>
-              }
+                  {
 
-              <input type="button" value="Delete" onClick={() => deleteClient(x._id)} /> <br />
-            </div>
+                    x.id == id ? updateuser && <UpdateUser data={x} callback={() => setUpdateuser(false)} /> : ""
+                  }
+                </Col>
+              </Row>
+            </Container>
           )
+
         }
+
         )
       }
+
 
     </div>
   );
